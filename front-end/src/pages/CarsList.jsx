@@ -114,7 +114,7 @@ export default function CarsList() {
     },
     {
       field: 'imported',
-      headerName: 'Ano fabricação',
+      headerName: 'Importado',
       width: 200,
       valueFormatter: params => {
         if(params.value === true)  return 'Sim'

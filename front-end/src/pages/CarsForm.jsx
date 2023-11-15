@@ -17,8 +17,10 @@ import ptLocale from 'date-fns/locale/pt-BR'
 import { parseISO } from 'date-fns'
 import { FormControlLabel, Switch } from '@mui/material'
 import InputAdornment from '@mui/material/InputAdornment'
+import Car from '../models/car'
+import { ZodError } from 'zod'
 
-export default function CarForm() {
+export default function CarsForm() {
 
   const navigate = useNavigate()
   const params = useParams()
@@ -30,13 +32,13 @@ export default function CarForm() {
     year_manufacture: '',
     imported: false,
     plates: '',
-    selling_price: '',
-    customer_id: ''
+    selling_price: null,
+    customer_id: '',
   }
 
   const [state, setState] = React.useState({
     car: carDefaults, 
-    customers: [],   
+    customers: [],
     showWaiting: false,
     notification: {
       show: false,
@@ -44,7 +46,8 @@ export default function CarForm() {
       message: ''
     },
     openDialog: false,
-    isFormModified: false
+    isFormModified: false,
+    validationErrors: {}
   })
 
   const {
@@ -53,7 +56,8 @@ export default function CarForm() {
     showWaiting,
     notification,
     openDialog,
-    isFormModified
+    isFormModified,
+    validationErrors
   } = state
   
   const maskFormChars = {
@@ -72,29 +76,19 @@ export default function CarForm() {
   // useEffect com vetor de dependências vazio. Será executado
   // uma vez, quando o componente for carregado
   React.useEffect(() => {
-    // Verifica se existe o parâmetro id na rota.
-    // Caso exista, chama a função fetchData() para carregar
-    // os dados indicados pelo parâmetro para edição
     fetchData(params.id)
   }, [])
 
   async function fetchData(isUpdating) {
-    // Exibe o backdrop para indicar que uma operação está ocorrendo
-    // em segundo plano
     setState({ ...state, showWaiting: true })
     try {
-
       let car = carDefaults
 
-      // Se estivermos no modo de atualização, devemos carregar o
-      // registro indicado no parâmetro da rota 
       if(isUpdating) {
         car = await myfetch.get(`car/${params.id}`)
         car.selling_date = parseISO(car.selling_date)
       }
 
-      // Busca a listagem de clientes para preencher o componente
-      // de escolha
       let customers = await myfetch.get('customer')
 
       // Cria um cliente "fake" que permite não selecionar nenhum
@@ -102,7 +96,6 @@ export default function CarForm() {
       customers.unshift({id: null, name: '(Nenhum cliente)'})
 
       setState({ ...state, showWaiting: false, car, customers })
-
     } 
     catch(error) {
       setState({ ...state, 
@@ -119,8 +112,8 @@ export default function CarForm() {
   function handleFieldChange(event) {
     const newCar = { ...car }
     
-    if (event.target.name === 'imported'){
-      newCar[event.target.name] = event.target.checked
+    if (event.target.name === 'imported' || event.target.name === 'selling_price'){
+      newCar[event.target.name] = event.target.checked ? event.target.checked : parseFloat(event.target.value) || null
     } else {
       newCar[event.target.name] = event.target.value
     }
@@ -128,7 +121,7 @@ export default function CarForm() {
     setState({ 
       ...state, 
       car: newCar,
-      isFormModified: true      // O formulário foi alterado
+      isFormModified: true // O formulário foi alterado
     })
   }
 
@@ -137,7 +130,12 @@ export default function CarForm() {
     event.preventDefault(false)   // Evita o recarregamento da página
   
     try {
-      let result 
+      car.selling_price = parseFloat(car.selling_price) || null
+
+      // Chama a validação da biblioteca Zod
+      Car.parse(car)
+
+      let result
       // se id então put para atualizar
       if(car.id) result = await myfetch.put(`car/${car.id}`, car)
       //senão post para criar novo 
@@ -147,17 +145,40 @@ export default function CarForm() {
         notification: {
           show: true,
           severity: 'success',
-          message: 'Dados salvos com sucesso.'
+          message: 'Dados salvos com sucesso.',
+          validationErrors: {}
         }  
       })  
     }
     catch(error) {
-      setState({ ...state, 
+
+      if(error instanceof ZodError) {
+        console.error(error)
+
+        // Preenchendo os estado validationError
+        // para abrir os erros para o usuário
+        let valErrors = {}
+        for(let e of error.issues) valErrors[e.path[0]] = e.message
+
+        setState({
+          ...state,
+          validationErrors: valErrors,
+          showWaiting: false, // Esconde o backdrop
+          notification: {
+            show: true,
+            severity: 'error',
+            message: 'ERRO: ' + error.message
+          } 
+        })
+      }
+      else setState({
+        ...state, 
         showWaiting: false, // Esconde o backdrop
         notification: {
           show: true,
           severity: 'error',
-          message: 'ERRO: ' + error.message
+          message: 'ERRO: ' + error.message,
+          validationErrors: {}
         } 
       })  
     }
@@ -235,6 +256,8 @@ export default function CarForm() {
             value={car.brand}
             onChange={handleFieldChange}
             autoFocus
+            error={validationErrors?.brand}
+            helperText={validationErrors?.brand}
           />
 
           <TextField 
@@ -244,9 +267,10 @@ export default function CarForm() {
             variant="filled"
             required
             fullWidth
-            placeholder="Ex.: Rua Principal"
             value={car.model}
             onChange={handleFieldChange}
+            error={validationErrors?.model}
+            helperText={validationErrors?.model}
           />
 
           <TextField 
@@ -258,6 +282,8 @@ export default function CarForm() {
             fullWidth
             value={car.color}
             onChange={handleFieldChange}
+            error={validationErrors?.color}
+            helperText={validationErrors?.color}
           />
 
           <TextField
@@ -307,7 +333,11 @@ export default function CarForm() {
                 variant="filled"
                 required
                 fullWidth
-                inputProps={{style: {textTransform: 'uppercase'}}}
+                inputProps={{ style: { textTransform: 'uppercase' } }}
+                value={car.plates.toUpperCase()}
+                onChange={handleFieldChange}
+                error={validationErrors?.plates ? true : false}
+                helperText={validationErrors?.plates}
               />
             }
           </InputMask>
@@ -324,6 +354,8 @@ export default function CarForm() {
             }}         
             value={car.selling_price}
             onChange={handleFieldChange}
+            error={validationErrors?.selling_price}
+            helperText={validationErrors?.selling_price}
           />
 
           <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptLocale}>
@@ -333,7 +365,12 @@ export default function CarForm() {
               onChange={ value => 
                 handleFieldChange({ target: { name: 'selling_date', value } }) 
               }
-              slotProps={{ textField: { variant: 'filled', fullWidth: true } }}
+              slotProps={{ textField: {
+                variant: 'filled',
+                fullWidth: true,
+                error: validationErrors?.selling_date,
+                helperText: validationErrors?.selling_date
+              }}}
             />
           </LocalizationProvider>
 
@@ -354,7 +391,7 @@ export default function CarForm() {
                 {customer.name}
               </MenuItem>
             ))}
-          </TextField>
+          </TextField>     
           
         </Box>
 
@@ -381,7 +418,5 @@ export default function CarForm() {
       
       </form>
     </>
-
-    
   )
 }
